@@ -1,4 +1,4 @@
-#include "merge_iterator2.hpp"
+#include "merge_iterator.hpp"
 
 #include <vector>
 #include <algorithm>
