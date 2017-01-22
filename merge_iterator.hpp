@@ -2,18 +2,36 @@
 #define MERGE_ITERATOR_HPP
 
 #include <iterator>
-#include <vector>
 #include <algorithm>
 #include <cassert>
 #include <array>
-#include <iostream>
-#include <random>
+#include <type_traits>
 
-template<typename Iterator>
+// all_same taken from
+// https://stackoverflow.com/questions/18017543/c11-variable-number-of-arguments-same-specific-type
+
+template<typename... T>
+struct all_same : std::false_type { };
+
+template<>
+struct all_same<> : std::true_type { };
+
+template<typename T>
+struct all_same<T> : std::true_type { };
+
+template<typename T, typename... Ts>
+struct all_same<T, T, Ts...> : all_same<T, Ts...> { };
+
+template<typename... T>
+struct front;
+
+template<typename T, typename... R>
+struct front<T, R...> { using type = T; };
+
+template<typename Iterator, size_t N>
 class merge_iterator
 {
-  std::array<Iterator, 2> first;
-  std::array<Iterator, 2> last;
+  std::array<Iterator, N*2> iterators;
   int which;
  public:
   using value_type = typename std::iterator_traits<Iterator>::value_type;
@@ -22,14 +40,25 @@ class merge_iterator
   using reference = typename std::iterator_traits<Iterator>::reference;
   using pointer = typename std::iterator_traits<Iterator>::pointer;
 
-  merge_iterator(Iterator l1 = Iterator{}, Iterator l2 = Iterator{})
-      : first{l1, l2}
-      , last{l1, l2}
-      , which(-1)
+  merge_iterator()
+      : iterators{}, which{-1}
   {}
-  merge_iterator(Iterator f1, Iterator l1, Iterator f2, Iterator l2)
-      : first{f1, f2}
-      , last{l1, l2}
+
+  template<typename... It, typename std::enable_if<all_same<It...>::value && sizeof...(It) == N, void*>::type = nullptr>
+  merge_iterator(It... l)
+      : iterators{}
+      , which(-1)
+  {
+    std::array<Iterator, N> its { l... };
+    for (int i = 0; i != N; ++i) {
+      iterators[2*i] = its[i];
+      iterators[2*i+1] = its[i];
+    }
+  }
+
+  template<typename... It, typename std::enable_if<all_same<It...>::value &&  sizeof...(It) == N*2, void*>::type = nullptr>
+  merge_iterator(It... l)
+      : iterators{l...}
       , which(-1)
   {
     which = find_min_element();
@@ -37,23 +66,23 @@ class merge_iterator
 
   reference operator*()
   {
-    assert(which != -1);
-    return *first[which];
+    assert(which % 2 == 0);
+    return *iterators[which];
   }
 
   pointer operator->()
   {
-    assert(which != -1);
-    return first[which];
+    assert(which % 2 == 0);
+    return iterators[which];
   }
 
   merge_iterator& operator++()
   {
-    assert(which == -1 || which != -1 && (first[which] != last[which]));
+    assert(which == -1 || (which % 2 == 0 && (iterators[which] != iterators[which+1])));
 
     if (which != -1)
     {
-      ++first[which];
+      ++iterators[which];
       which = find_min_element();
     }
 
@@ -69,45 +98,46 @@ class merge_iterator
 
   friend bool operator==(merge_iterator const& l, merge_iterator const& r)
   {
-    return l.first == r.first;
+    return l.iterators == r.iterators;
   }
 
  private:
   int find_min_element()
   {
-    int i = 0;
-    std::array<int, 2> a;
-    if (first[0] != last[0]) {
-      a[i++] = 0;
+    int n = 0;
+    std::array<int, N> a;
+    for (int i = 0; i != 2*N; i += 2) {
+      if (iterators[i] != iterators[i+1]) {
+        a[n++] = i;
+      }
     }
-    if (first[1] != last[1]) {
-      a[i++] = 1;
-    }
-    if (i) {
-      auto it = std::min_element(a.begin(), a.begin() + i, [this](int i, int j) { return *first[i] < *first[j]; });
+    if (n) {
+      auto it = std::min_element(a.begin(), a.begin() + n, [this](int i, int j) { return *iterators[i] < *iterators[j]; });
       return *it;
     } else {
       return -1;
     }
   }
+
 };
 
-template<typename Iterator>
-bool operator!=(merge_iterator<Iterator> const& l, merge_iterator<Iterator> const& r)
+template<typename Iterator, size_t N>
+bool operator!=(merge_iterator<Iterator, N> const& l, merge_iterator<Iterator, N> const& r)
 {
   return !(l == r);
 }
 
-template<typename Iterator>
-auto make_merge_iterator(Iterator f1, Iterator l1, Iterator f2, Iterator l2)
+template<typename... Iterator>
+auto make_begin_merge_iterator(Iterator... its)
 {
-  return merge_iterator<Iterator>{f1, l1, f2, l2};
+  static_assert(sizeof...(Iterator) % 2 == 0, "there must be an even number of iterators");
+  return merge_iterator<typename front<Iterator...>::type, sizeof...(Iterator) / 2>{its...};
 }
 
-template<typename Iterator>
-auto make_merge_iterator(Iterator l1, Iterator l2)
+template<typename... Iterator>
+auto make_end_merge_iterator(Iterator... its)
 {
-  return merge_iterator<Iterator>{l1, l2};
+  return merge_iterator<typename front<Iterator...>::type, sizeof...(Iterator)>{its...};
 }
 
 #endif
